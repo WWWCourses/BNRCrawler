@@ -1,20 +1,134 @@
 import requests
+import re
 
-class Crawler:
-	def __init__(self, url) -> None:
-		self.url = url
+try:
+	from BNRCrawler.scraper import Scraper
+	from BNRCrawler.db import DB
+except:
+	from scraper import Scraper
+	from db import DB
 
-	def save_html(self):
-		filename = './data/result.html'
-		with open(filename, 'w') as f:
-			f.write(self.html)
+class Crawler():
+	def __init__(self, base_url, data_path='./data/'):
+		self.base_url = base_url
+		self.seed = []
+		self.data_path = data_path
+		self.current_page_number = 1
 
-	def get_html(self)-> str:
-		r = requests.get(self.url)
+		self.db = DB()
+		# self.db.drop_radiotheaters_table()
+		# self.db.create_radiotheaters_table()
+
+	def _is_all_in_seed(self, urls_list):
+		if set(urls_list).issubset(self.seed):
+			return True
+		else:
+			return False
+
+	def make_filename(self,url):
+		""" Extracts domain from a url.
+			Prepend data_path and append '.html'
+
+			:param url: string
+
+			return <domain>.html string
+		"""
+		rx = re.compile(r'^https?:\/\/(?:www.)?([^\/]+)\/?')
+		m = rx.search(url)
+		if m:
+			filename = self.data_path + m[1]  + '.html'
+			# print(filename)
+			return filename
+		else:
+			print(f'Can not get domain from {url}')
+			exit(-1)
+
+	def write_to_file(self,filename, content):
+		""" Write string to given filename
+				:param filename: string
+				:param content: sring
+		"""
+		try:
+			with open(filename, 'w',encoding='utf-8') as f:
+				f.write(content)
+		except FileNotFoundError:
+			print(f'File {filename} does not exists!')
+		except Exception as e:
+			print(f'Can not write to file: {filename}: {str(e)}')
+			exit(-1)
+
+	def get_html(self,url):
+		try:
+			r = requests.get(url)
+		except requests.RequestException:
+			# try with SSL verification disabled.
+			# this is just a dirty workaraound
+			# check https://levelup.gitconnected.com/solve-the-dreadful-certificate-issues-in-python-requests-module-2020d922c72f
+			r = requests.get(url,verify=False)
+		except Exception as e:
+			print(f'Can not get url: {url}: {str(e)}!')
+			exit(-1)
+
+		# set content encoding explicitely
+		r.encoding="utf-8"
 
 		if r.ok:
-			self.html = r.text
-			return self.html
+			return r.text
+		else:
+			print('The server did not return success response. Bye...')
+			exit()
 
 
+	def get_seed(self, url):
+		print(f'Crawling page {self.current_page_number}: {url}')
+		print(f'Seed: {self.seed}')
+		html = self.get_html(url)
 
+		scraper = Scraper(html)
+		pubs_urls = scraper.get_pubs_urls()
+		# prepend 'https://bnr.bg' to pubs_urls:
+		pubs_urls = ['https://bnr.bg'+url for url in pubs_urls]
+
+		# if pubs_urls is not empy or is not already in seed => crawl next
+		if not self._is_all_in_seed(pubs_urls):
+			# concatenate pubs.urls to self.seed
+			self.seed = [*self.seed, *pubs_urls]
+
+			# make next page url
+			self.current_page_number+=1
+			next_page_url = f'{self.base_url}?page_1_2={self.current_page_number}'
+
+			# get urls from next_page_url
+			self.get_seed(next_page_url)
+
+	def get_pub_data(self, url):
+		print(f'Crawling page: {url}')
+		html = self.get_html(url)
+
+		scraper = Scraper(html)
+		pub_data = scraper.get_pub_data()
+
+		return pub_data
+
+	def save_pub_data(self,url):
+		pub_data = self.get_pub_data(url)
+		# print(f'Save to db: ', pub_data)
+
+		self.db.insert_row(pub_data)
+		# self.db.conn.close()
+
+	def run(self):
+		# get all URLs to be scraped from base_url
+		self.get_seed(self.base_url)
+		print(f'Seed contains {len(self.seed)} urls')
+
+		# for url in self.seed:
+		# 	self.save_pub_data(url)
+
+		print('Crawler finished its job!')
+
+
+if __name__ == '__main__':
+	base_url = 'https://bnr.bg/hristobotev/radioteatre/list'
+	crawler = Crawler(base_url)
+	crawler.run()

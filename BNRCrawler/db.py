@@ -1,4 +1,8 @@
-from BNRCrawler.config.read_config import read_db_config
+try:
+	from BNRCrawler.config.read_config import read_db_config
+except:
+	from config.read_config import read_db_config
+
 
 import mysql.connector
 from mysql.connector import errorcode
@@ -42,21 +46,59 @@ class DB:
 			cursor.execute(sql)
 			self.conn.commit()
 
-	def insert_row(self, data):
-		print(data)
-		q = """
-			INSERT INTO radiotheaters
+	def insert_rows(self, rows_data):
+		sql = """
+			INSERT IGNORE INTO radiotheaters
+			(title, pub_date, content)
+			VALUES ( %s, %s, %s)
+		"""
+
+		with self.conn.cursor() as cursor:
+			cursor.executemany(sql, rows_data)
+			self.conn.commit()
+
+	def insert_row(self, row_data):
+		sql = """
+			INSERT IGNORE INTO radiotheaters
 				(title, pub_date, content)
 				VALUES ( %s, %s, %s)
 		"""
 
 		with self.conn.cursor(prepared=True) as cursor:
-			cursor.execute(q, data)
+			cursor.execute(sql, tuple(row_data.values()))
 			self.conn.commit()
 
-	def truncate_table(self):
-				pass
+	def select_all_data(self):
+		sql = "SELECT id, title, pub_date, content FROM  radiotheaters"
 
+		with self.conn.cursor() as cursor:
+			cursor.execute(sql)
+			result = cursor.fetchall()
+
+		return result
+
+	def get_last_updated_date(self):
+		sql = 'SELECT MAX(updated_at) AS "Max Date" FROM radiotheaters;'
+		with self.conn.cursor() as cursor:
+			cursor.execute(sql)
+			result = cursor.fetchone()
+
+		if result:
+			return result[0]
+		else:
+			raise ValueError('No data in table')
+
+	def get_column_names(self):
+		sql = "SELECT id, title, pub_date, content FROM  radiotheaters LIMIT 1;"
+
+		with self.conn.cursor() as cursor:
+			cursor.execute(sql)
+			result = cursor.fetchone()
+
+		return cursor.column_names
+
+	def truncate_table(self):
+		pass
 
 	def close_connection(self):
 		self.conn.close()
